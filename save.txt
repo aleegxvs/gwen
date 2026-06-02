@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""
+Agente de IA Conversacional AVANCADO com Groq
+Multiplas personalidades, salvar/carregar conversa, estatisticas
+"""
+
+import os
+import sys
+import json
+from datetime import datetime
+from groq import Groq
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+class Cor:
+    RESET    = "\033[0m"
+    NEGRITO  = "\033[1m"
+    DIM      = "\033[2m"
+    BRANCO   = "\033[97m"
+    CINZA    = "\033[90m"
+    VERDE    = "\033[92m"
+    AMARELO  = "\033[93m"
+    AZUL     = "\033[94m"
+    ROXO     = "\033[95m"
+    CIANO    = "\033[96m"
+    VERMELHO = "\033[91m"
+
+
+def linha(char="─", largura=60, cor=Cor.CINZA):
+    print(f"{cor}{char * largura}{Cor.RESET}")
+
+
+def cabecalho(personalidade="assistente"):
+    print()
+    linha("─")
+    print(f"  {Cor.ROXO}{Cor.NEGRITO}Agente IA{Cor.RESET}  {Cor.CINZA}groq / llama-3.3-70b  [{personalidade}]{Cor.RESET}")
+    linha("─")
+    print()
+
+
+def menu_ajuda():
+    cmds = [
+        ("/personalidade <nome>", "trocar modo"),
+        ("/listar",               "ver personalidades"),
+        ("/salvar",               "salvar conversa em JSON"),
+        ("/carregar <arquivo>",   "carregar conversa salva"),
+        ("/historico",            "ver conversa completa"),
+        ("/limpar",               "resetar conversa"),
+        ("/stats",                "ver estatisticas"),
+        ("/sair",                 "encerrar"),
+    ]
+    print(f"  {Cor.CINZA}Comandos:{Cor.RESET}")
+    for cmd, desc in cmds:
+        print(f"  {Cor.AMARELO}{cmd:<26}{Cor.RESET}{Cor.CINZA}{desc}{Cor.RESET}")
+    print()
+
+
+def init_groq():
+    api_key = os.getenv("GROQ_API_KEY")
+
+    if not api_key:
+        print(f"  {Cor.AMARELO}!{Cor.RESET} Chave nao encontrada no .env")
+        print(f"  {Cor.CINZA}Digite sua chave Groq:{Cor.RESET} ", end="")
+        api_key = input().strip()
+
+        if not api_key:
+            print(f"\n  {Cor.VERMELHO}✗{Cor.RESET} Nenhuma chave fornecida.\n")
+            sys.exit(1)
+
+    return Groq(api_key=api_key)
+
+
+def imprimir_texto(texto, prefixo="  "):
+    palavras = texto.split()
+    linha_atual = prefixo
+    for palavra in palavras:
+        if len(linha_atual) + len(palavra) + 1 > 58:
+            print(linha_atual)
+            linha_atual = prefixo + palavra
+        else:
+            linha_atual += (" " if linha_atual != prefixo else "") + palavra
+    if linha_atual.strip():
+        print(linha_atual)
+
+
+class AgentIAAvancado:
+    def __init__(self, client):
+        self.client = client
+        self.modelo = "llama-3.3-70b-versatile"
+        self.historico = []
+
+        self.personalidades = {
+            "assistente": "Voce e um assistente amigavel e prestativo. Responde em portugues de forma clara e concisa.",
+            "programador": "Voce e um especialista em programacao Python, Arduino e JavaScript. Use exemplos de codigo quando necessario.",
+            "professor":   "Voce e um professor paciente e didatico. Ensina conceitos do simples para o complexo.",
+            "criativo":    "Voce e criativo e imaginativo. Ajuda com ideias, historias e projetos criativos.",
+        }
+
+        self.personalidade_atual = "assistente"
+        self.sistema = self.personalidades[self.personalidade_atual]
+
+    def conversar(self, mensagem):
+        self.historico.append({"role": "user", "content": mensagem})
+
+        try:
+            resposta = self.client.chat.completions.create(
+                model=self.modelo,
+                max_tokens=1024,
+                messages=[
+                    {"role": "system", "content": self.sistema},
+                    *self.historico
+                ]
+            )
+
+            texto = resposta.choices[0].message.content
+            self.historico.append({"role": "assistant", "content": texto})
+            return texto
+
+        except Exception as e:
+            return f"Erro: {str(e)}"
+
+    def trocar_personalidade(self, nova):
+        if nova in self.personalidades:
+            self.personalidade_atual = nova
+            self.sistema = self.personalidades[nova]
+            return True
+        return False
+
+    def salvar_conversa(self, nome=None):
+        if not self.historico:
+            return None, "Nenhuma conversa para salvar."
+
+        if nome is None:
+            nome = f"conversa_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+        dados = {
+            "timestamp": datetime.now().isoformat(),
+            "personalidade": self.personalidade_atual,
+            "historico": self.historico
+        }
+
+        try:
+            with open(nome, "w", encoding="utf-8") as f:
+                json.dump(dados, f, ensure_ascii=False, indent=2)
+            return nome, None
+        except Exception as e:
+            return None, str(e)
+
+    def carregar_conversa(self, nome):
+        try:
+            with open(nome, "r", encoding="utf-8") as f:
+                dados = json.load(f)
+
+            self.historico = dados.get("historico", [])
+            self.personalidade_atual = dados.get("personalidade", "assistente")
+            self.sistema = self.personalidades.get(self.personalidade_atual, self.personalidades["assistente"])
+            return len(self.historico), None
+        except Exception as e:
+            return 0, str(e)
+
+    def exibir_historico(self):
+        if not self.historico:
+            print(f"\n  {Cor.CINZA}Nenhuma conversa ainda.{Cor.RESET}\n")
+            return
+
+        print()
+        linha("─")
+        for i, msg in enumerate(self.historico, 1):
+            if msg["role"] == "user":
+                print(f"  {Cor.VERDE}você  {Cor.RESET}{msg['content']}")
+            else:
+                conteudo = msg["content"][:300] + "..." if len(msg["content"]) > 300 else msg["content"]
+                print(f"  {Cor.ROXO}ia    {Cor.RESET}{Cor.DIM}{conteudo}{Cor.RESET}")
+            print()
+        linha("─")
+        print()
+
+    def exibir_stats(self):
+        if not self.historico:
+            print(f"\n  {Cor.CINZA}Nenhuma conversa ainda.{Cor.RESET}\n")
+            return
+
+        msgs_user = [m for m in self.historico if m["role"] == "user"]
+        msgs_ia   = [m for m in self.historico if m["role"] == "assistant"]
+        tokens_aprox = sum(len(m["content"]) for m in self.historico) // 4
+
+        print()
+        linha("─")
+        print(f"  {Cor.CINZA}personalidade   {Cor.RESET}{self.personalidade_atual}")
+        print(f"  {Cor.CINZA}suas mensagens  {Cor.RESET}{len(msgs_user)}")
+        print(f"  {Cor.CINZA}respostas ia    {Cor.RESET}{len(msgs_ia)}")
+        print(f"  {Cor.CINZA}tokens aprox.   {Cor.RESET}~{tokens_aprox}")
+        linha("─")
+        print()
+
+    def exibir_listar(self):
+        print()
+        for nome in self.personalidades:
+            marca = f"{Cor.VERDE}*{Cor.RESET}" if nome == self.personalidade_atual else f"{Cor.CINZA} {Cor.RESET}"
+            print(f"  {marca} {Cor.AMARELO}{nome}{Cor.RESET}")
+        print()
+
+    def executar(self):
+        cabecalho(self.personalidade_atual)
+        menu_ajuda()
+
+        while True:
+            try:
+                print(f"{Cor.VERDE}>{Cor.RESET} ", end="")
+                entrada = input().strip()
+
+                if not entrada:
+                    continue
+
+                # Comandos com /
+                if entrada.startswith("/"):
+                    partes = entrada.split()
+                    cmd  = partes[0][1:].lower()
+                    args = partes[1:] if len(partes) > 1 else []
+
+                    if cmd == "sair":
+                        print(f"\n  {Cor.CINZA}Ate logo.{Cor.RESET}\n")
+                        break
+
+                    elif cmd == "historico":
+                        self.exibir_historico()
+
+                    elif cmd == "limpar":
+                        self.historico = []
+                        print(f"\n  {Cor.VERDE}✓{Cor.RESET} Conversa reiniciada.\n")
+
+                    elif cmd == "listar":
+                        self.exibir_listar()
+
+                    elif cmd == "personalidade":
+                        if not args:
+                            print(f"\n  {Cor.AMARELO}uso:{Cor.RESET} /personalidade <nome>\n")
+                        elif self.trocar_personalidade(args[0]):
+                            self.personalidade_atual = args[0]
+                            print(f"\n  {Cor.VERDE}✓{Cor.RESET} Personalidade: {Cor.ROXO}{args[0]}{Cor.RESET}\n")
+                        else:
+                            print(f"\n  {Cor.VERMELHO}✗{Cor.RESET} Personalidade nao encontrada. Use /listar.\n")
+
+                    elif cmd == "salvar":
+                        nome = args[0] if args else None
+                        arquivo, erro = self.salvar_conversa(nome)
+                        if erro:
+                            print(f"\n  {Cor.VERMELHO}✗{Cor.RESET} {erro}\n")
+                        else:
+                            print(f"\n  {Cor.VERDE}✓{Cor.RESET} Salvo em {Cor.CIANO}{arquivo}{Cor.RESET}\n")
+
+                    elif cmd == "carregar":
+                        if not args:
+                            print(f"\n  {Cor.AMARELO}uso:{Cor.RESET} /carregar <arquivo.json>\n")
+                        else:
+                            qtd, erro = self.carregar_conversa(args[0])
+                            if erro:
+                                print(f"\n  {Cor.VERMELHO}✗{Cor.RESET} {erro}\n")
+                            else:
+                                print(f"\n  {Cor.VERDE}✓{Cor.RESET} {qtd} mensagens carregadas.\n")
+
+                    elif cmd == "stats":
+                        self.exibir_stats()
+
+                    else:
+                        print(f"\n  {Cor.VERMELHO}✗{Cor.RESET} Comando desconhecido: /{cmd}\n")
+
+                # Conversa normal
+                else:
+                    print(f"  {Cor.CINZA}aguardando...{Cor.RESET}", end="\r")
+                    resposta = self.conversar(entrada)
+                    print(" " * 30, end="\r")
+
+                    print()
+                    print(f"  {Cor.ROXO}ia{Cor.RESET}")
+                    print()
+                    imprimir_texto(resposta)
+                    print()
+
+            except KeyboardInterrupt:
+                print(f"\n\n  {Cor.CINZA}Ate logo.{Cor.RESET}\n")
+                break
+            except Exception as e:
+                print(f"\n  {Cor.VERMELHO}✗{Cor.RESET} {str(e)}\n")
+
+
+def main():
+    print(f"\n{Cor.CINZA}inicializando...{Cor.RESET}")
+    client = init_groq()
+    print(f"{Cor.VERDE}✓{Cor.RESET} {Cor.CINZA}conectado{Cor.RESET}")
+
+    agente = AgentIAAvancado(client)
+    agente.executar()
+
+
+if __name__ == "__main__":
+    main()
