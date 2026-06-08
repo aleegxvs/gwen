@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gwen - parceira de produtividade para terminal com Groq. v2.1.0"""
+"""Gwen - parceira de produtividade para terminal com Groq. v2.2.0"""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════════════════
 # CONSTANTES
 # ══════════════════════════════════════════════════════════════════════════════
-APP_VERSION     = "2.1.0"
+APP_VERSION     = "2.2.0"
 GWEN_VIOLET     = "#A855F7"
 GWEN_PINK       = "#EC4899"
 GWEN_VIOLET_DIM = "#7C3AED"
@@ -562,6 +562,7 @@ class ProjectTracker:
             "steps": [{"desc": s, "done": False} for s in steps],
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
+            "last_checkin": datetime.now(timezone.utc).isoformat(),
             "active": True,
             "notes": "",
         }
@@ -611,6 +612,59 @@ class ProjectTracker:
             p["notes"] = (p.get("notes", "") + "\n" + note).strip()[-4000:]
             p["updated_at"] = datetime.now(timezone.utc).isoformat()
             self._save()
+
+    def checkin(self) -> None:
+        """Registra o momento do último check-in no projeto ativo."""
+        p = self.active
+        if p:
+            p["last_checkin"] = datetime.now(timezone.utc).isoformat()
+            p["updated_at"]   = datetime.now(timezone.utc).isoformat()
+            self._save()
+
+    def days_since_checkin(self) -> int | None:
+        """Retorna dias desde o último check-in, ou None se não houver projeto ativo."""
+        p = self.active
+        if not p:
+            return None
+        raw = p.get("last_checkin") or p.get("created_at")
+        try:
+            last = datetime.fromisoformat(raw)
+            delta = datetime.now(timezone.utc) - last
+            return delta.days
+        except Exception:
+            return None
+
+    def next_pending_step(self) -> tuple[int, str] | None:
+        """Retorna (índice 1-based, descrição) da próxima etapa pendente."""
+        p = self.active
+        if not p:
+            return None
+        for i, s in enumerate(p["steps"], 1):
+            if not s["done"]:
+                return (i, s["desc"])
+        return None
+
+    def weekly_summary(self) -> dict:
+        """Resumo da semana: etapas concluídas nos últimos 7 dias por projeto."""
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        result: dict[str, dict] = {}
+        for name, p in self._data.items():
+            done  = sum(1 for s in p["steps"] if s["done"])
+            total = len(p["steps"])
+            updated = p.get("updated_at", "")
+            try:
+                active_recently = datetime.fromisoformat(updated) >= cutoff
+            except Exception:
+                active_recently = False
+            result[name] = {
+                "goal": p.get("goal", ""),
+                "done": done,
+                "total": total,
+                "active_recently": active_recently,
+                "is_active": name == self._active,
+            }
+        return result
 
     def delete(self, name: str) -> bool:
         if name not in self._data:
@@ -769,6 +823,8 @@ class UI:
             ("/desetapa <n>",           "desmarcar etapa"),
             ("/nota <texto>",           "adicionar nota ao projeto ativo"),
             ("/deletar <nome>",         "remover projeto"),
+            ("/checkin",               "check-in: Gwen pergunta seu progresso"),
+            ("/semana",                "weekly review: o que avançou e foco da semana"),
             ("/personalidade <nome>",   "trocar modo de resposta"),
             ("/listar",                 "listar personalidades"),
             ("/salvar [nome]",          "salvar conversa (cifrada)"),
@@ -915,6 +971,105 @@ class GwenAgent:
         self.ui.ok(f"projeto criado automaticamente: [bold]{name}[/bold]")
         self.ui.active_project_bar(self.tracker)
 
+    def _startup_message(self) -> None:
+        """
+        Onboarding se não há projetos.
+        Check-in se há projeto ativo parado há 1+ dias.
+        """
+        projects = self.tracker.all()
+
+        # Onboarding — primeira vez
+        if not projects:
+            self.ui.assistant(
+                "Olá! Sou a Gwen, sua parceira de produtividade. 🎯\n\n"
+                "Meu foco é te ajudar a sair da ideia e chegar à execução.\n\n"
+                "**O que você quer realizar hoje?**"
+            )
+            return
+
+        # Check-in — projeto ativo parado
+        days = self.tracker.days_since_checkin()
+        if days is not None and days >= 1:
+            p    = self.tracker.active
+            name = self.tracker.active_name
+            next_step = self.tracker.next_pending_step()
+            done  = sum(1 for s in p["steps"] if s["done"])
+            total = len(p["steps"])
+
+            if done == total:
+                msg = (
+                    f"Bem-vindo de volta! 🎉\n\n"
+                    f"O projeto **{name}** está **100% concluído**.\n\n"
+                    f"Quer criar um novo objetivo ou revisar o que foi feito?"
+                )
+            elif next_step:
+                idx, desc = next_step
+                msg = (
+                    f"Bem-vindo de volta! ✦\n\n"
+                    f"Projeto ativo: **{name}** — {done}/{total} etapas concluídas.\n\n"
+                    f"Próxima etapa: **{idx}. {desc}**\n\n"
+                    f"Conseguiu avançar nisso? Me conta como está."
+                )
+            else:
+                msg = f"Bem-vindo de volta! Projeto **{name}** em andamento ({done}/{total})."
+
+            self.ui.assistant(msg)
+
+    def _cmd_checkin(self) -> None:
+        """Check-in manual: usuário informa progresso, Gwen responde com próximo passo."""
+        if not self.tracker.active:
+            self.ui.warn("nenhum projeto ativo. Use /projeto <nome>.")
+            return
+        p    = self.tracker.active
+        name = self.tracker.active_name
+        done  = sum(1 for s in p["steps"] if s["done"])
+        total = len(p["steps"])
+        pending = [f"{i}. {s['desc']}" for i, s in enumerate(p["steps"], 1) if not s["done"]]
+
+        prompt_text = (
+            f"O usuário está fazendo um check-in do projeto '{name}'.\n"
+            f"Progresso atual: {done}/{total} etapas concluídas.\n"
+            f"Etapas pendentes: {', '.join(pending[:4]) if pending else 'nenhuma'}.\n\n"
+            f"Faça UMA pergunta direta sobre o progresso mais recente e sugira o próximo passo concreto."
+        )
+        with self.ui.console.status(
+            f"[bold {GWEN_VIOLET}]  preparando check-in…[/bold {GWEN_VIOLET}]",
+            spinner="dots", spinner_style=f"bold {GWEN_PINK}",
+        ):
+            answer = self.ask(prompt_text)
+        if answer:
+            self.tracker.checkin()
+            self.ui.assistant(answer)
+
+    def _cmd_semana(self) -> None:
+        """/semana — Weekly Review: o que avançou, o que está parado, foco sugerido."""
+        summary = self.tracker.weekly_summary()
+        if not summary:
+            self.ui.warn("nenhum projeto ainda.")
+            return
+
+        lines = ["Resumo semanal dos projetos:\n"]
+        for name, info in summary.items():
+            status = "✦ ativo" if info["is_active"] else ("movimentado" if info["active_recently"] else "parado")
+            lines.append(f"- **{name}**: {info['done']}/{info['total']} etapas | {status}")
+            if info["goal"]:
+                lines.append(f"  Objetivo: {info['goal'][:80]}")
+
+        prompt_text = (
+            "\n".join(lines) +
+            "\n\nCom base nesse resumo:\n"
+            "1. Destaque o que avançou.\n"
+            "2. Sinalize o que está parado e por quê pode estar travado.\n"
+            "3. Sugira UM foco prioritário para essa semana com próximo passo concreto."
+        )
+        with self.ui.console.status(
+            f"[bold {GWEN_VIOLET}]  gerando review semanal…[/bold {GWEN_VIOLET}]",
+            spinner="dots", spinner_style=f"bold {GWEN_PINK}",
+        ):
+            answer = self.ask(prompt_text)
+        if answer:
+            self.ui.assistant(answer)
+
     def _compact(self) -> None:
         try:
             old = self.memory.messages[:-self.settings.keep_last]
@@ -938,6 +1093,7 @@ class GwenAgent:
         self.ui.header(self.prompt.current, self.settings.model)
         self.ui.active_project_bar(self.tracker)
         self.ui.help()
+        self._startup_message()
         while True:
             try:
                 user_input = self.ui.prompt()
@@ -1010,6 +1166,20 @@ class GwenAgent:
             elif self.tracker.complete_step(int(args[0])):
                 self.ui.ok(f"etapa {args[0]} concluída ✓")
                 self.ui.active_project_bar(self.tracker)
+                # Sugere próximo passo automaticamente
+                nxt = self.tracker.next_pending_step()
+                if nxt:
+                    idx, desc = nxt
+                    self.ui.console.print(
+                        f"  [dim {GWEN_PINK}]→ próxima etapa: [bold]{idx}. {desc}[/bold][/dim {GWEN_PINK}]"
+                    )
+                else:
+                    p    = self.tracker.active
+                    total = len(p["steps"]) if p else 0
+                    self.ui.console.print(
+                        f"  [{GWEN_VIOLET}]🎉 Todas as {total} etapas concluídas! Use /semana para revisar.[/{GWEN_VIOLET}]"
+                    )
+                self.ui.console.print()
             else:
                 self.ui.error("etapa inválida.")
         elif cmd == "desetapa":
@@ -1036,6 +1206,10 @@ class GwenAgent:
                     self.ui.ok(f"projeto '{args[0]}' removido.")
                 else:
                     self.ui.error(f"projeto '{args[0]}' não encontrado.")
+        elif cmd == "checkin":
+            self._cmd_checkin()
+        elif cmd == "semana":
+            self._cmd_semana()
         elif cmd == "salvar":
             self._save(args[0] if args else None)
         elif cmd == "carregar":
