@@ -164,3 +164,34 @@ Na primeira execução, instala as dependências automaticamente e inicia.
 
 **Alterado — personalidades:**
 - "assistente" → "produtividade" (novo padrão, focado em planos e execução)
+
+---
+
+## v2.2.0 — 2025-06-08
+
+**O que foi alterado:** MVP de melhorias de produtividade
+**Por que:** O agente ainda não seguia o ciclo completo da Gwen — faltavam onboarding, check-in de retorno, weekly review e feedback automático de progresso
+
+**Adicionado — onboarding (`_startup_message`):**
+- Primeira sessão sem projetos: Gwen se apresenta e faz a pergunta principal ("O que você quer realizar hoje?")
+- Sessões seguintes com projeto parado 1+ dias: Gwen retoma com check-in automático, mostrando progresso e próxima etapa pendente
+- Projeto 100% concluído: Gwen celebra e sugere criar novo objetivo
+
+**Adicionado — `/checkin`:**
+- Check-in manual a qualquer momento
+- Gwen consulta o progresso atual do projeto, faz uma pergunta direta sobre o avanço e sugere o próximo passo concreto
+- Registra timestamp do check-in em `last_checkin` no projeto
+
+**Adicionado — `/semana` (Weekly Review):**
+- Consolida todos os projetos: o que avançou, o que está parado
+- Gwen analisa o resumo e sugere UM foco prioritário para a semana com próximo passo
+
+**Adicionado — hint automático após `/etapa`:**
+- Ao concluir uma etapa, a Gwen mostra imediatamente a próxima etapa pendente
+- Se todas as etapas foram concluídas, exibe mensagem de conclusão e sugere `/semana`
+
+**Adicionado — `ProjectTracker` novos métodos:**
+- `checkin()` — registra `last_checkin`
+- `days_since_checkin()` — retorna dias desde o último check-in
+- `next_pending_step()` — retorna a próxima etapa não concluída
+- `weekly_summary()` — consolida todos os projetos para o review semanal
