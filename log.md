@@ -195,3 +195,58 @@ Na primeira execução, instala as dependências automaticamente e inicia.
 - `days_since_checkin()` — retorna dias desde o último check-in
 - `next_pending_step()` — retorna a próxima etapa não concluída
 - `weekly_summary()` — consolida todos os projetos para o review semanal
+
+---
+
+## v3.0.0 — 2025-06-08
+
+**O que foi alterado:** Adição da camada web (MVP); `gwen.py` não foi tocado
+**Por que:** Preparação para lançamento — interface acessível no browser sem dependência de terminal
+
+**Criado — `server.py`:**
+- FastAPI servindo o `GwenAgent` via HTTP
+- `NullUI` substitui a UI de terminal por uma versão silenciosa — o agente não precisa saber que está rodando na web
+- Endpoints cobrem todo o fluxo da Gwen: chat, projetos, etapas, check-in, semana, personalidades, memória
+- Agente instanciado uma vez e compartilhado entre requests
+- Auto-install de `fastapi` e `uvicorn` na primeira execução
+
+**Criado — `frontend/index.html`:**
+- Interface completa em HTML/CSS/JS puro, sem frameworks
+- Layout: sidebar com projetos + etapas; área de chat com bolhas; topbar com ações rápidas
+- Markdown renderizado nas respostas da Gwen (negrito, listas, headings, código)
+- Barra de progresso por projeto com clique para ativar
+- Etapas clicáveis para marcar/desmarcar com hint da próxima etapa
+- Seletor de personalidades
+- Input de nota direto na sidebar
+- Botões de check-in, weekly review e limpar memória no topo
+- Indicador de digitação animado enquanto Gwen pensa
+- Toasts de feedback para ações
+- Paleta violet/pink consistente com a identidade da Gwen
+
+**Atualizado — `requirements.txt`:**
+- Adicionados `fastapi>=0.111.0` e `uvicorn[standard]>=0.29.0`
+
+**Como rodar:**
+```bash
+python server.py
+# Acesse: http://localhost:8000
+```
+
+---
+
+## v3.1.0 — 2025-06-08
+
+**O que foi alterado:** Redesign completo de `frontend/index.html`
+**Por que:** Interface anterior era densa e genérica; usuário pediu visual minimalista inspirado na Monica IA com ícones Apple do Icons8
+
+**Mudanças visuais:**
+- Paleta clara (light mode) com fundo `#f7f7f8` — minimalista, sem peso visual
+- Tipografia trocada para Inter — fonte padrão Apple/produto
+- Sidebar de ícones fina (64px) com tooltips ao hover — navegação limpa sem texto
+- Painel lateral deslizante (280px) para Projetos e Personalidade — abre/fecha ao clicar no ícone
+- Topbar do chat com avatar circular, indicador de status online e ações contextuais
+- Bolhas de chat arredondadas (estilo iMessage) com sombra sutil
+- Empty state com avatar grande, tagline e chips de sugestão clicáveis
+- Ícones iOS Apple via CDN do Icons8 (`img.icons8.com/ios/50/`) em todos os botões
+- Animação `popIn` nas bolhas
+- Toast centralizado na base (estilo iOS)
