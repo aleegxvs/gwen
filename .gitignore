@@ -1,0 +1,25 @@
+# Ambiente
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Chaves e segredos
+.keys/
+*.enc
+
+# Conversas salvas (dados do usuário)
+conversas/
+
+# Logs
+logs/
+
+# Projetos salvos (dados do usuário)
+projetos.json
+
+# Editor
+.vscode/
+.idea/
+*.swp
